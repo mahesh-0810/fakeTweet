@@ -5,12 +5,18 @@ import bcrypt from 'bcryptjs'
 import rateLimit from 'express-rate-limit'
 import { getDb, generateUserId } from './db.js'
 import { signToken, requireAuth, SESSION_COOKIE } from './middleware/auth.js'
+import { fetchSentiment } from './sentiment.js'
 
 const DEFAULT_TWEETS_LIMIT = 50
 const MAX_TWEETS_LIMIT = 100
 
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
+}
+
+function normalizeSentiment(value) {
+  if (value === null || value === undefined) return null
+  return value === 1 || value === true
 }
 
 export function createApp() {
@@ -274,7 +280,7 @@ export function createApp() {
 
       // Fetch one extra row to know whether there's a next page without a second COUNT query.
       const rows = await db.allAsync(
-        `SELECT tweets.id, tweets.content, tweets.created_at, users.username
+        `SELECT tweets.id, tweets.content, tweets.created_at, tweets.sentiment, users.username
          FROM tweets
          JOIN users ON tweets.user_id = users.id
          ${whereClause}
@@ -283,7 +289,11 @@ export function createApp() {
         [...params, limit + 1, offset]
       )
 
-      res.json({ success: true, tweets: rows.slice(0, limit), hasMore: rows.length > limit })
+      const tweets = rows
+        .slice(0, limit)
+        .map((row) => ({ ...row, sentiment: normalizeSentiment(row.sentiment) }))
+
+      res.json({ success: true, tweets, hasMore: rows.length > limit })
     })
   )
 
@@ -302,16 +312,20 @@ export function createApp() {
       }
 
       const db = getDb()
+      const sentiment = await fetchSentiment(trimmed) // boolean | null, never throws
 
-      const id = await db.runInsertAsync('INSERT INTO tweets (user_id, content) VALUES (?, ?);', [
-        req.user.id,
-        trimmed,
-      ])
-      const row = await db.getAsync('SELECT id, content, created_at FROM tweets WHERE id = ?;', [id])
+      const id = await db.runInsertAsync(
+        'INSERT INTO tweets (user_id, content, sentiment) VALUES (?, ?, ?);',
+        [req.user.id, trimmed, sentiment === null ? null : sentiment ? 1 : 0]
+      )
+      const row = await db.getAsync(
+        'SELECT id, content, created_at, sentiment FROM tweets WHERE id = ?;',
+        [id]
+      )
 
       res.status(201).json({
         success: true,
-        tweet: { ...row, username: req.user.username },
+        tweet: { ...row, sentiment: normalizeSentiment(row.sentiment), username: req.user.username },
       })
     })
   )
