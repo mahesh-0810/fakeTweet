@@ -325,7 +325,9 @@ export function createApp() {
 
       // Insert-then-delete: the row above is already committed. An explicit
       // `false` (never `null`) removes it immediately, before responding —
-      // no client ever observes it via GET /api/tweets.
+      // no client ever observes it via GET /api/tweets. `null` (service
+      // down/unreachable/timed out/malformed) stays posted with an unknown
+      // sentiment, to be resolved by a later re-check.
       if (sentiment === false) {
         await db.runAsync('DELETE FROM tweets WHERE id = ?;', [id])
         return res.status(422).json({

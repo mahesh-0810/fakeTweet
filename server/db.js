@@ -87,9 +87,12 @@ export async function ensureSentimentColumn(conn) {
 
 // One-time startup cleanup: purges any negative-sentiment rows that were
 // persisted before this rule existed (e.g. from Step 8's initial rollout).
-// Separate from the per-request insert-then-delete in server/app.js's
-// POST /api/tweets — that removes a single row synchronously per request;
-// this is a bulk backfill run once per process startup. Idempotent.
+// `NULL` (unverified — service down/timed out/malformed) rows are left
+// alone: their sentiment is unknown, not negative, and may be resolved by
+// a later re-check. Separate from the per-request insert-then-delete in
+// server/app.js's POST /api/tweets — that removes a single row
+// synchronously per request; this is a bulk backfill run once per process
+// startup. Idempotent.
 export async function removeNegativeSentimentTweets(conn) {
   await run(conn, 'DELETE FROM tweets WHERE sentiment = 0;')
 }

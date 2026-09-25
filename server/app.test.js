@@ -203,3 +203,33 @@ test('a negative-sentiment tweet is inserted then deleted, and the client sees a
   const feed = await feedRes.json()
   assert.equal(feed.tweets.length, 0)
 })
+
+test('an unverified-sentiment tweet (service unreachable) still posts, kept with sentiment null for later resolution', async (t) => {
+  const originalSentimentUrl = process.env.SENTIMENT_API_URL
+  // Port 1 refuses connections immediately — fetchSentiment resolves to null.
+  process.env.SENTIMENT_API_URL = 'http://127.0.0.1:1/api/sentiment'
+  t.after(() => {
+    if (originalSentimentUrl === undefined) delete process.env.SENTIMENT_API_URL
+    else process.env.SENTIMENT_API_URL = originalSentimentUrl
+  })
+
+  const { server, baseUrl } = await startTestServer()
+  t.after(() => server.close())
+
+  const cookie = await registerAndLogin(baseUrl, randomUsername(), 'a-fine-password')
+
+  const postRes = await fetch(`${baseUrl}/api/tweets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ content: 'this tweet has unverifiable sentiment' }),
+  })
+  assert.equal(postRes.status, 201)
+  const postBody = await postRes.json()
+  assert.equal(postBody.success, true)
+  assert.equal(postBody.tweet.sentiment, null)
+
+  const feedRes = await fetch(`${baseUrl}/api/tweets?scope=mine`, { headers: { Cookie: cookie } })
+  const feed = await feedRes.json()
+  assert.equal(feed.tweets.length, 1)
+  assert.equal(feed.tweets[0].sentiment, null)
+})
