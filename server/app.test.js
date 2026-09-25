@@ -108,11 +108,20 @@ test('tweets require auth to read or post, and round-trip correctly', async (t) 
     body: JSON.stringify({ content: 'hello from the test suite' }),
   })
   assert.equal(postRes.status, 201)
+  const postBody = await postRes.json()
+  assert.ok(
+    postBody.tweet.sentiment === true || postBody.tweet.sentiment === false || postBody.tweet.sentiment === null,
+    'sentiment must be true, false, or null — never 0/1/undefined'
+  )
 
   const feedRes = await fetch(`${baseUrl}/api/tweets?scope=mine`, { headers: { Cookie: cookie } })
   const feed = await feedRes.json()
   assert.equal(feed.tweets.length, 1)
   assert.equal(feed.tweets[0].content, 'hello from the test suite')
+  assert.ok(
+    feed.tweets[0].sentiment === true || feed.tweets[0].sentiment === false || feed.tweets[0].sentiment === null,
+    'sentiment must be true, false, or null — never 0/1/undefined'
+  )
 })
 
 test('GET /api/tweets paginates via limit/offset and reports hasMore', async (t) => {
