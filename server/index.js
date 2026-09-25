@@ -1,13 +1,12 @@
 import './env.js'
 import { createApp } from './app.js'
-import { initDb, seedDb } from './db.js'
+import { initDb } from './db.js'
 
 const PORT = process.env.PORT || 5000
 
 async function main() {
   try {
     await initDb()
-    await seedDb()
   } catch (err) {
     console.error('Fatal: failed to initialize database.')
     console.error(err)

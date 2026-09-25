@@ -23,11 +23,6 @@ export default function Landing() {
             Log in
           </Link>
         </div>
-
-        <p className="landing-hint">
-          Demo login &mdash; username <strong>mahesh</strong>, password{' '}
-          <strong>mahesh</strong>
-        </p>
       </div>
 
       <div className="landing-side">

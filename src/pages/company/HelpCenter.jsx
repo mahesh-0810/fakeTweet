@@ -11,11 +11,7 @@ export default function HelpCenter() {
       </p>
 
       <h2>How do I reset my password?</h2>
-      <p>
-        Password recovery isn't available in this preview yet. If you're
-        stuck, try the demo account: username <strong>mahesh</strong>,
-        password <strong>mahesh</strong>.
-      </p>
+      <p>Password recovery isn't available in this preview yet.</p>
 
       <h2>How do I switch between light and dark mode?</h2>
       <p>

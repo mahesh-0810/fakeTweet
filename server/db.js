@@ -1,5 +1,4 @@
 import sqlite3Pkg from 'sqlite3'
-import bcrypt from 'bcryptjs'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -104,20 +103,4 @@ export async function initDb() {
   await db.runAsync(CREATE_TWEETS_TABLE)
   await ensureSentimentColumn(db)
   await removeNegativeSentimentTweets(db)
-}
-
-export async function seedDb() {
-  const db = getDb()
-
-  const row = await db.getAsync('SELECT COUNT(*) AS count FROM users;')
-  if (row.count > 0) return
-
-  const id = generateUserId()
-  const username = 'mahesh'.toLowerCase()
-  const passwordHash = await bcrypt.hash('mahesh', 10)
-
-  await db.runAsync(
-    'INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?);',
-    [id, username, passwordHash]
-  )
 }

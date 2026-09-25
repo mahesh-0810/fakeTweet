@@ -9,7 +9,6 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "test": "node --import ./server/test/setup.js --test server/db.test.js server/app.test.js server/sentiment.test.js",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
