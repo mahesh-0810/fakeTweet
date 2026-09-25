@@ -4,7 +4,7 @@ import sqlite3Pkg from 'sqlite3'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { generateUserId, seedDb, getDb, ensureSentimentColumn } from './db.js'
+import { generateUserId, seedDb, getDb, ensureSentimentColumn, removeNegativeSentimentTweets } from './db.js'
 
 test('generateUserId returns unique 16-character hex strings', () => {
   const a = generateUserId()
@@ -62,4 +62,52 @@ test('ensureSentimentColumn adds sentiment to a pre-existing tweets table withou
   assert.equal(rows.length, 1)
   assert.equal(rows[0].content, 'pre-existing tweet')
   assert.equal(rows[0].sentiment, null)
+})
+
+test('removeNegativeSentimentTweets deletes only sentiment=0 rows, and is idempotent', async (t) => {
+  const dbPath = path.join(tmpdir(), `negative-sentiment-cleanup-${Date.now()}-${process.pid}.db`)
+  const conn = new sqlite3Pkg.Database(dbPath)
+  t.after(() => {
+    conn.close()
+    rmSync(dbPath, { force: true })
+  })
+
+  function run(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      conn.run(sql, params, (err) => (err ? reject(err) : resolve()))
+    })
+  }
+  function all(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      conn.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)))
+    })
+  }
+
+  await run(`
+    CREATE TABLE tweets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sentiment INTEGER
+    );
+  `)
+  await run('INSERT INTO tweets (user_id, content, sentiment) VALUES (?, ?, ?);', ['u1', 'positive tweet', 1])
+  await run('INSERT INTO tweets (user_id, content, sentiment) VALUES (?, ?, ?);', ['u1', 'negative tweet', 0])
+  await run('INSERT INTO tweets (user_id, content, sentiment) VALUES (?, ?, ?);', ['u1', 'unknown tweet', null])
+
+  await removeNegativeSentimentTweets(conn)
+
+  let rows = await all('SELECT content, sentiment FROM tweets ORDER BY id;')
+  assert.equal(rows.length, 2)
+  assert.deepEqual(
+    rows.map((r) => r.content).sort(),
+    ['positive tweet', 'unknown tweet']
+  )
+  assert.ok(rows.every((r) => r.sentiment !== 0))
+
+  await removeNegativeSentimentTweets(conn) // idempotent — must not throw or delete more
+
+  rows = await all('SELECT content, sentiment FROM tweets ORDER BY id;')
+  assert.equal(rows.length, 2)
 })

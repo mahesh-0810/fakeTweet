@@ -1,5 +1,9 @@
 const DEFAULT_SENTIMENT_API_URL = 'http://localhost:3001/api/sentiment'
-const DEFAULT_TIMEOUT_MS = 3000
+// The sentiment service decides how long analysis takes — a tweet's
+// negative/positive outcome must be based on its real answer, not a
+// short cutoff. This is a generous safety net (avoids hanging forever
+// on a truly dead connection), not a realistic analysis-time budget.
+const DEFAULT_TIMEOUT_MS = 35_000
 
 // Never throws. Returns true/false on a well-formed response, null on any
 // failure: network error, non-2xx status, malformed JSON body, missing/

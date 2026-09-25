@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import { createApp } from './app.js'
 
 function randomUsername() {
@@ -165,4 +166,70 @@ test('the auth rate limiter blocks after repeated attempts', async (t) => {
     lastStatus = res.status
   }
   assert.equal(lastStatus, 429)
+})
+
+test('a negative-sentiment tweet is inserted then deleted, and the client sees a 422 with no trace', async (t) => {
+  const sentimentServer = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ tweet: '', sentiment: false }))
+  })
+  await new Promise((resolve) => sentimentServer.listen(0, resolve))
+  const { port } = sentimentServer.address()
+
+  const originalSentimentUrl = process.env.SENTIMENT_API_URL
+  process.env.SENTIMENT_API_URL = `http://127.0.0.1:${port}/api/sentiment`
+  t.after(() => {
+    sentimentServer.close()
+    if (originalSentimentUrl === undefined) delete process.env.SENTIMENT_API_URL
+    else process.env.SENTIMENT_API_URL = originalSentimentUrl
+  })
+
+  const { server, baseUrl } = await startTestServer()
+  t.after(() => server.close())
+
+  const cookie = await registerAndLogin(baseUrl, randomUsername(), 'a-fine-password')
+
+  const postRes = await fetch(`${baseUrl}/api/tweets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ content: 'this is a negative tweet' }),
+  })
+  assert.equal(postRes.status, 422)
+  const postBody = await postRes.json()
+  assert.equal(postBody.success, false)
+  assert.ok(typeof postBody.error === 'string' && postBody.error.length > 0)
+
+  const feedRes = await fetch(`${baseUrl}/api/tweets?scope=mine`, { headers: { Cookie: cookie } })
+  const feed = await feedRes.json()
+  assert.equal(feed.tweets.length, 0)
+})
+
+test('an unverified-sentiment tweet (service unreachable) still posts, kept with sentiment null for later resolution', async (t) => {
+  const originalSentimentUrl = process.env.SENTIMENT_API_URL
+  // Port 1 refuses connections immediately — fetchSentiment resolves to null.
+  process.env.SENTIMENT_API_URL = 'http://127.0.0.1:1/api/sentiment'
+  t.after(() => {
+    if (originalSentimentUrl === undefined) delete process.env.SENTIMENT_API_URL
+    else process.env.SENTIMENT_API_URL = originalSentimentUrl
+  })
+
+  const { server, baseUrl } = await startTestServer()
+  t.after(() => server.close())
+
+  const cookie = await registerAndLogin(baseUrl, randomUsername(), 'a-fine-password')
+
+  const postRes = await fetch(`${baseUrl}/api/tweets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ content: 'this tweet has unverifiable sentiment' }),
+  })
+  assert.equal(postRes.status, 201)
+  const postBody = await postRes.json()
+  assert.equal(postBody.success, true)
+  assert.equal(postBody.tweet.sentiment, null)
+
+  const feedRes = await fetch(`${baseUrl}/api/tweets?scope=mine`, { headers: { Cookie: cookie } })
+  const feed = await feedRes.json()
+  assert.equal(feed.tweets.length, 1)
+  assert.equal(feed.tweets[0].sentiment, null)
 })
