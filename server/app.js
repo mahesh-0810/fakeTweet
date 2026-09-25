@@ -323,6 +323,17 @@ export function createApp() {
         [id]
       )
 
+      // Insert-then-delete: the row above is already committed. An explicit
+      // `false` (never `null`) removes it immediately, before responding —
+      // no client ever observes it via GET /api/tweets.
+      if (sentiment === false) {
+        await db.runAsync('DELETE FROM tweets WHERE id = ?;', [id])
+        return res.status(422).json({
+          success: false,
+          error: 'This tweet was flagged as negative and has been removed.',
+        })
+      }
+
       res.status(201).json({
         success: true,
         tweet: { ...row, sentiment: normalizeSentiment(row.sentiment), username: req.user.username },
