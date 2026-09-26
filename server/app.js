@@ -14,7 +14,7 @@ function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
 }
 
-function normalizeSentiment(value) {
+function normalizeBoolColumn(value) {
   if (value === null || value === undefined) return null
   return value === 1 || value === true
 }
@@ -280,7 +280,7 @@ export function createApp() {
 
       // Fetch one extra row to know whether there's a next page without a second COUNT query.
       const rows = await db.allAsync(
-        `SELECT tweets.id, tweets.content, tweets.created_at, tweets.sentiment, users.username
+        `SELECT tweets.id, tweets.content, tweets.created_at, tweets.sentiment, tweets.global, users.username
          FROM tweets
          JOIN users ON tweets.user_id = users.id
          ${whereClause}
@@ -291,7 +291,11 @@ export function createApp() {
 
       const tweets = rows
         .slice(0, limit)
-        .map((row) => ({ ...row, sentiment: normalizeSentiment(row.sentiment) }))
+        .map((row) => ({
+          ...row,
+          sentiment: normalizeBoolColumn(row.sentiment),
+          global: normalizeBoolColumn(row.global),
+        }))
 
       res.json({ success: true, tweets, hasMore: rows.length > limit })
     })
@@ -312,34 +316,45 @@ export function createApp() {
       }
 
       const db = getDb()
-      const sentiment = await fetchSentiment(trimmed) // boolean | null, never throws
 
+      // Save first: sentiment/global default to NULL (unverified) until the
+      // async check below resolves. The client never waits on the sentiment
+      // service to see its own tweet.
       const id = await db.runInsertAsync(
-        'INSERT INTO tweets (user_id, content, sentiment) VALUES (?, ?, ?);',
-        [req.user.id, trimmed, sentiment === null ? null : sentiment ? 1 : 0]
+        'INSERT INTO tweets (user_id, content) VALUES (?, ?);',
+        [req.user.id, trimmed]
       )
       const row = await db.getAsync(
-        'SELECT id, content, created_at, sentiment FROM tweets WHERE id = ?;',
+        'SELECT id, content, created_at, sentiment, global FROM tweets WHERE id = ?;',
         [id]
       )
 
-      // Insert-then-delete: the row above is already committed. An explicit
-      // `false` (never `null`) removes it immediately, before responding —
-      // no client ever observes it via GET /api/tweets. `null` (service
-      // down/unreachable/timed out/malformed) stays posted with an unknown
-      // sentiment, to be resolved by a later re-check.
-      if (sentiment === false) {
-        await db.runAsync('DELETE FROM tweets WHERE id = ?;', [id])
-        return res.status(422).json({
-          success: false,
-          error: 'This tweet was flagged as negative and has been removed.',
-        })
-      }
-
       res.status(201).json({
         success: true,
-        tweet: { ...row, sentiment: normalizeSentiment(row.sentiment), username: req.user.username },
+        tweet: {
+          ...row,
+          sentiment: normalizeBoolColumn(row.sentiment),
+          global: normalizeBoolColumn(row.global),
+          username: req.user.username,
+        },
       })
+
+      // Fire-and-forget, after responding: resolve sentiment out-of-band and
+      // persist it. `null` (service down/unreachable/timed out/malformed)
+      // leaves both columns NULL for a later re-check — no write needed.
+      // Negative-sentiment tweets are no longer deleted here; that's handled
+      // by a separate, dedicated feature.
+      fetchSentiment(trimmed)
+        .then((sentiment) => {
+          if (sentiment === null) return
+          const value = sentiment ? 1 : 0
+          return db.runAsync('UPDATE tweets SET sentiment = ?, global = ? WHERE id = ?;', [
+            value,
+            value,
+            id,
+          ])
+        })
+        .catch((err) => console.error(`Failed to persist sentiment for tweet ${id}:`, err))
     })
   )
 
