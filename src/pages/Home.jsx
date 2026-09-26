@@ -109,6 +109,20 @@ export default function Home() {
     }
   }, [scope, debouncedSearch])
 
+  // Live poll: silently refreshes the feed every 10s so a tweet whose
+  // sentiment resolves negative (and gets deleted server-side) disappears
+  // without the user having to switch tabs/search/post again. Self-contained
+  // — delete this effect to fall back to fetching only on those triggers.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTweets({ scope, search: debouncedSearch }).then((result) => {
+        if (result.ok) setTweets(result.tweets)
+      })
+    }, 10000)
+
+    return () => clearInterval(interval)
+  }, [scope, debouncedSearch])
+
   async function handleSubmitTweet(e) {
     e.preventDefault()
     const trimmed = composerText.trim()

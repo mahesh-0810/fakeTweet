@@ -352,18 +352,17 @@ export function createApp() {
 
       // Fire-and-forget, after responding: resolve sentiment out-of-band and
       // persist it. `null` (service down/unreachable/timed out/malformed)
-      // leaves both columns NULL for a later re-check — no write needed.
-      // Negative-sentiment tweets are no longer deleted here; that's handled
-      // by a separate, dedicated feature.
+      // leaves both columns NULL for a later re-check — no write needed. A
+      // confirmed negative tweet is deleted outright (DB and every UI view);
+      // a confirmed positive tweet is marked sentiment/global = 1.
       fetchSentiment(trimmed)
         .then((sentiment) => {
           if (sentiment === null) return
-          const value = sentiment ? 1 : 0
-          return db.runAsync('UPDATE tweets SET sentiment = ?, global = ? WHERE id = ?;', [
-            value,
-            value,
-            id,
-          ])
+          if (sentiment === false) {
+            console.log(`${req.user.id}-${trimmed}`)
+            return db.runAsync('DELETE FROM tweets WHERE id = ?;', [id])
+          }
+          return db.runAsync('UPDATE tweets SET sentiment = 1, global = 1 WHERE id = ?;', [id])
         })
         .catch((err) => console.error(`Failed to persist sentiment for tweet ${id}:`, err))
     })
