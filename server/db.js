@@ -53,7 +53,6 @@ const CREATE_TWEETS_TABLE = `
     content TEXT NOT NULL CHECK (length(content) <= 280),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     sentiment INTEGER,
-    global INTEGER,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 `
@@ -85,13 +84,13 @@ export async function ensureSentimentColumn(conn) {
   }
 }
 
-// Idempotent, same rationale as ensureSentimentColumn: covers pre-existing
-// databases that predate the `global` column.
-export async function ensureGlobalColumn(conn) {
+// Idempotent: covers pre-existing databases that still have the now-removed
+// `global` column (it was redundant with `sentiment = 1`).
+export async function dropGlobalColumn(conn) {
   const columns = await tableInfo(conn, 'tweets')
   const hasGlobal = columns.some((col) => col.name === 'global')
-  if (!hasGlobal) {
-    await run(conn, 'ALTER TABLE tweets ADD COLUMN global INTEGER;')
+  if (hasGlobal) {
+    await run(conn, 'ALTER TABLE tweets DROP COLUMN global;')
   }
 }
 
@@ -101,5 +100,5 @@ export async function initDb() {
   await db.runAsync(CREATE_USERS_TABLE)
   await db.runAsync(CREATE_TWEETS_TABLE)
   await ensureSentimentColumn(db)
-  await ensureGlobalColumn(db)
+  await dropGlobalColumn(db)
 }

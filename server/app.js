@@ -262,16 +262,11 @@ export function createApp() {
         conditions.push('tweets.user_id = ?')
         params.push(req.user.id)
       } else {
-        // "All" feed visibility: your own tweets show unless confirmed
-        // negative (pending/unverified `NULL` still shows); other users'
-        // tweets show only once confirmed positive (`global = 1`).
-        conditions.push(
-          `(
-            (tweets.user_id = ? AND (tweets.sentiment = 1 OR tweets.sentiment IS NULL))
-            OR (tweets.user_id != ? AND tweets.global = 1)
-          )`
-        )
-        params.push(req.user.id, req.user.id)
+        // "All" feed visibility: any confirmed-positive tweet shows (yours
+        // or anyone else's); your own pending/unverified (`NULL`) tweet
+        // also shows while it awaits a sentiment result.
+        conditions.push('(tweets.sentiment = 1 OR (tweets.user_id = ? AND tweets.sentiment IS NULL))')
+        params.push(req.user.id)
       }
 
       const term = typeof search === 'string' ? search.trim() : ''
@@ -291,7 +286,7 @@ export function createApp() {
 
       // Fetch one extra row to know whether there's a next page without a second COUNT query.
       const rows = await db.allAsync(
-        `SELECT tweets.id, tweets.content, tweets.created_at, tweets.sentiment, tweets.global, users.username
+        `SELECT tweets.id, tweets.content, tweets.created_at, tweets.sentiment, users.username
          FROM tweets
          JOIN users ON tweets.user_id = users.id
          ${whereClause}
@@ -302,11 +297,7 @@ export function createApp() {
 
       const tweets = rows
         .slice(0, limit)
-        .map((row) => ({
-          ...row,
-          sentiment: normalizeBoolColumn(row.sentiment),
-          global: normalizeBoolColumn(row.global),
-        }))
+        .map((row) => ({ ...row, sentiment: normalizeBoolColumn(row.sentiment) }))
 
       res.json({ success: true, tweets, hasMore: rows.length > limit })
     })
@@ -328,33 +319,28 @@ export function createApp() {
 
       const db = getDb()
 
-      // Save first: sentiment/global default to NULL (unverified) until the
-      // async check below resolves. The client never waits on the sentiment
+      // Save first: sentiment defaults to NULL (unverified) until the async
+      // check below resolves. The client never waits on the sentiment
       // service to see its own tweet.
       const id = await db.runInsertAsync(
         'INSERT INTO tweets (user_id, content) VALUES (?, ?);',
         [req.user.id, trimmed]
       )
       const row = await db.getAsync(
-        'SELECT id, content, created_at, sentiment, global FROM tweets WHERE id = ?;',
+        'SELECT id, content, created_at, sentiment FROM tweets WHERE id = ?;',
         [id]
       )
 
       res.status(201).json({
         success: true,
-        tweet: {
-          ...row,
-          sentiment: normalizeBoolColumn(row.sentiment),
-          global: normalizeBoolColumn(row.global),
-          username: req.user.username,
-        },
+        tweet: { ...row, sentiment: normalizeBoolColumn(row.sentiment), username: req.user.username },
       })
 
       // Fire-and-forget, after responding: resolve sentiment out-of-band and
       // persist it. `null` (service down/unreachable/timed out/malformed)
-      // leaves both columns NULL for a later re-check — no write needed. A
+      // leaves the column NULL for a later re-check — no write needed. A
       // confirmed negative tweet is deleted outright (DB and every UI view);
-      // a confirmed positive tweet is marked sentiment/global = 1.
+      // a confirmed positive tweet is marked sentiment = 1.
       fetchSentiment(trimmed)
         .then((sentiment) => {
           if (sentiment === null) return
@@ -362,7 +348,7 @@ export function createApp() {
             console.log(`${req.user.id}-${trimmed}`)
             return db.runAsync('DELETE FROM tweets WHERE id = ?;', [id])
           }
-          return db.runAsync('UPDATE tweets SET sentiment = 1, global = 1 WHERE id = ?;', [id])
+          return db.runAsync('UPDATE tweets SET sentiment = 1 WHERE id = ?;', [id])
         })
         .catch((err) => console.error(`Failed to persist sentiment for tweet ${id}:`, err))
     })
