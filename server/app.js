@@ -261,6 +261,17 @@ export function createApp() {
       if (scope === 'mine') {
         conditions.push('tweets.user_id = ?')
         params.push(req.user.id)
+      } else {
+        // "All" feed visibility: your own tweets show unless confirmed
+        // negative (pending/unverified `NULL` still shows); other users'
+        // tweets show only once confirmed positive (`global = 1`).
+        conditions.push(
+          `(
+            (tweets.user_id = ? AND (tweets.sentiment = 1 OR tweets.sentiment IS NULL))
+            OR (tweets.user_id != ? AND tweets.global = 1)
+          )`
+        )
+        params.push(req.user.id, req.user.id)
       }
 
       const term = typeof search === 'string' ? search.trim() : ''
